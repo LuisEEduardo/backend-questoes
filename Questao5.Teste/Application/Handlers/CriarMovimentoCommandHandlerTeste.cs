@@ -9,7 +9,6 @@ using Questao5.Domain.Exceptions;
 using Questao5.Domain.Repositories;
 using Questao5.Infrastructure.Locking;
 using Questao5.Teste.Utils;
-using System;
 
 namespace Questao5.Teste.Application.Handlers
 {

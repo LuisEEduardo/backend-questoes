@@ -26,6 +26,7 @@ namespace Questao5.Infrastructure.Services.Controllers
         /// <returns>Retorna o ID da movimentação criada.</returns>
         /// <response code="200">Movimentação criada com sucesso.</response>
         /// <response code="400">Dados de entrada inválidos.</response>
+        /// <response code="500">Erro interno</response>
         [HttpPost]
         [ProducesResponseType(typeof(CriarMovimentoResponse), 200)]
         [ProducesResponseType(typeof(List<MensagemErrorCustomizadoResponse>), 400)]
@@ -43,6 +44,7 @@ namespace Questao5.Infrastructure.Services.Controllers
         /// <returns>Retorna o saldo atual da conta corrente.</returns>
         /// <response code="200">Saldo obtido com sucesso.</response>
         /// <response code="400">Dados de entrada inválidos.</response>
+        /// /// <response code="500">Erro interno</response>
         [HttpGet("{idContacorrente}")]
         [ProducesResponseType(typeof(SaldoResponse), 200)]
         [ProducesResponseType(typeof(List<MensagemErrorCustomizadoResponse>), 400)]

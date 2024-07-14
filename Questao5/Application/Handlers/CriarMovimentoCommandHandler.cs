@@ -34,13 +34,13 @@ namespace Questao5.Application.Handlers
 
         public async Task<CriarMovimentoResponse> Handle(CriarMovimentoCommand request, CancellationToken cancellationToken)
         {
+            var resultadoValidacao = await _validator.ValidateAsync(request, cancellationToken);
+
+            if (!resultadoValidacao.IsValid)
+                throw new ValidacaoException(resultadoValidacao.Errors);
+
             using (await _lockManager.AcquireLockAsync(request.IdContacorrente))
             {
-                var resultadoValidacao = await _validator.ValidateAsync(request, cancellationToken);
-
-                 if (!resultadoValidacao.IsValid)
-                    throw new ValidacaoException(resultadoValidacao.Errors);
-
                 var contaCorrente = await _contaCorrenteRepository.BuscarPorId(request.IdContacorrente);
 
                 if (contaCorrente is null)

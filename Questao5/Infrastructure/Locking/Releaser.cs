@@ -1,5 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Metadata.Internal;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 
 namespace Questao5.Infrastructure.Locking
 {
@@ -20,8 +19,6 @@ namespace Questao5.Infrastructure.Locking
 
         public void Dispose()
         {
-            Console.WriteLine($"Key liberada {_key} , data {DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss fffffff")}");
-
             _semaphore.Release();
             if (_semaphore.CurrentCount == 1)
             {
