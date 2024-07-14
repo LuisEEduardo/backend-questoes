@@ -27,5 +27,10 @@ namespace Questao5.Infrastructure.Database.Repositories
         {
             return await _dbConnection.QueryFirstOrDefaultAsync<T>(sql, param);
         }
+
+        public IDbTransaction BeginTransaction()
+        {
+            return _dbConnection.BeginTransaction();
+        }
     }
 }

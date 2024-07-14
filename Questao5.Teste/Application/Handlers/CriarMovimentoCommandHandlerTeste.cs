@@ -1,9 +1,13 @@
-﻿using NSubstitute;
+﻿using FluentAssertions;
+using FluentValidation;
+using FluentValidation.Results;
+using NSubstitute;
 using Questao5.Application.Commands.Requests;
 using Questao5.Application.Handlers;
 using Questao5.Domain.Entities;
 using Questao5.Domain.Exceptions;
 using Questao5.Domain.Repositories;
+using Questao5.Infrastructure.Locking;
 using Questao5.Teste.Utils;
 
 namespace Questao5.Teste.Application.Handlers
@@ -13,18 +17,24 @@ namespace Questao5.Teste.Application.Handlers
         private readonly IMovimentoRepository _mockMovimentoRepository;
         private readonly IContaCorrenteRepository _mockContaCorrenteRepository;
         private readonly IIdempotenciaRepository _mockIdempotenciaRepository;
+        private readonly ILockManager _lockManager;
         private readonly CriarMovimentoCommandHandler _handler;
+        private readonly IValidator<CriarMovimentoCommand> _mockvalidator;
 
         public CriarMovimentoCommandHandlerTeste()
         {
             _mockMovimentoRepository = Substitute.For<IMovimentoRepository>();
             _mockContaCorrenteRepository = Substitute.For<IContaCorrenteRepository>();
             _mockIdempotenciaRepository = Substitute.For<IIdempotenciaRepository>();
+            _lockManager = Substitute.For<ILockManager>();
+            _mockvalidator = Substitute.For<IValidator<CriarMovimentoCommand>>();
 
             _handler = new CriarMovimentoCommandHandler(
                 _mockMovimentoRepository,
                 _mockContaCorrenteRepository,
-                _mockIdempotenciaRepository);
+                _mockIdempotenciaRepository,
+                _lockManager,
+                _mockvalidator);
         }
 
         [Fact]
@@ -33,11 +43,16 @@ namespace Questao5.Teste.Application.Handlers
             var command = BuscarCriarMovimentoCommand();
             var contaCorrente = ContaCorrenteUtilsTeste.BuscarContaCorrente();
 
+            _mockvalidator.ValidateAsync(command, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(BuscarValidationResultComSucesso()));
+
             _mockContaCorrenteRepository.BuscarPorId(command.IdContacorrente)
                .Returns(Task.FromResult(contaCorrente));
 
             _mockMovimentoRepository.BuscarPorIdMovimento(command.IdMovimento)
                 .Returns(Task.FromResult<Movimento>(null));
+
+            _mockMovimentoRepository.BuscarPorIdContacorrente(command.IdContacorrente).Returns(Task.FromResult(MovimentoUtilsTeste.MovimentosList()));
 
             _mockMovimentoRepository.Adicionar(Arg.Any<Movimento>())
                 .Returns(Task.FromResult(1));
@@ -57,16 +72,25 @@ namespace Questao5.Teste.Application.Handlers
             var command = BuscarCriarMovimentoCommand();
             command.Valor = 0;
 
+            string mensagemErro = "TIPO: INVALID_VALUE | O valor deve ser maior que 0";
+            string nomePropriedade = "Valor";
+
+            _mockvalidator.ValidateAsync(command, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(BuscarValidationResultCustomizadaComErro(nomePropriedade, mensagemErro)));
+
             var exception = await Assert.ThrowsAsync<ValidacaoException>(() => _handler.Handle(command, CancellationToken.None));
 
-            Assert.Equal("O valor deve ser maior que 0", exception.Mensagem);
-            Assert.Equal("TIPO: INVALID_VALUE", exception.TipoErro);
+            exception.ValidacaoErros.Should().NotBeEmpty();
+            exception.ValidacaoErros.Select(e => e.ErrorMessage).Should().Equal(mensagemErro);
         }
 
         [Fact]
         public async Task Handle_ContaCorrenteNaoExiste_DeveLancarValidacaoException()
         {
             var command = BuscarCriarMovimentoCommand();
+
+            _mockvalidator.ValidateAsync(command, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(BuscarValidationResultComSucesso()));
 
             _mockContaCorrenteRepository.BuscarPorId(command.IdContacorrente)
                .Returns(Task.FromResult<ContaCorrente>(null));
@@ -83,6 +107,9 @@ namespace Questao5.Teste.Application.Handlers
             var command = BuscarCriarMovimentoCommand();
             var contaCorrente = ContaCorrenteUtilsTeste.BuscarContaCorrenteInativa();
 
+            _mockvalidator.ValidateAsync(command, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(BuscarValidationResultComSucesso()));
+
             _mockContaCorrenteRepository.BuscarPorId(command.IdContacorrente)
               .Returns(Task.FromResult<ContaCorrente>(contaCorrente));
 
@@ -98,6 +125,9 @@ namespace Questao5.Teste.Application.Handlers
             var command = BuscarCriarMovimentoCommand();
             var contaCorrente = ContaCorrenteUtilsTeste.BuscarContaCorrente();
             var movimento = MovimentoUtilsTeste.BuscarMovimento();
+
+            _mockvalidator.ValidateAsync(command, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(BuscarValidationResultComSucesso()));
 
             _mockContaCorrenteRepository.BuscarPorId(command.IdContacorrente)
                 .Returns(Task.FromResult(contaCorrente));
@@ -117,17 +147,43 @@ namespace Questao5.Teste.Application.Handlers
             var command = BuscarCriarMovimentoCommandError();
             var contaCorrente = ContaCorrenteUtilsTeste.BuscarContaCorrente();
 
+            string mensagemErro = "TIPO: INVALID_TYPE | O {PropertyName} deve ser D (débito) ou C (crédito)";
+            string nomePropriedade = "TipoMovimento";
+
+            _mockvalidator.ValidateAsync(command, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(BuscarValidationResultCustomizadaComErro(nomePropriedade, mensagemErro)));          
+
+            var exception = await Assert.ThrowsAsync<ValidacaoException>(() => _handler.Handle(command, CancellationToken.None));
+
+            exception.ValidacaoErros.Should().NotBeEmpty();
+            exception.ValidacaoErros.Select(e => e.ErrorMessage).Should().Equal(mensagemErro);            
+        }
+
+        [Fact]
+        public async Task Handle_SaldoInsuficiente_DeveLancarValidacaoException()
+        {
+            var command = BuscarCriarMovimentoCommand();
+            command.Valor = 240;
+            command.TipoMovimento = 'D';
+            var contaCorrente = ContaCorrenteUtilsTeste.BuscarContaCorrente();
+
+            _mockvalidator.ValidateAsync(command, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(BuscarValidationResultComSucesso()));
+
             _mockContaCorrenteRepository.BuscarPorId(command.IdContacorrente)
-              .Returns(Task.FromResult(contaCorrente));
+               .Returns(Task.FromResult(contaCorrente));
 
             _mockMovimentoRepository.BuscarPorIdMovimento(command.IdMovimento)
                 .Returns(Task.FromResult<Movimento>(null));
 
+            _mockMovimentoRepository.BuscarPorIdContacorrente(command.IdContacorrente).Returns(Task.FromResult(MovimentoUtilsTeste.MovimentosList()));
+
             var exception = await Assert.ThrowsAsync<ValidacaoException>(() => _handler.Handle(command, CancellationToken.None));
 
-            Assert.Equal("O Tipo movimento deve ser D (débito) ou C (crédito)", exception.Mensagem);
-            Assert.Equal("TIPO: INVALID_TYPE", exception.TipoErro);
+            Assert.Equal("Saldo insuficiente para realizar a movimentação", exception.Mensagem);
+            Assert.Equal("TIPO: INSUFFICIENT_FUNDS", exception.TipoErro);
         }
+
 
         public CriarMovimentoCommand BuscarCriarMovimentoCommand()
         {
@@ -153,6 +209,21 @@ namespace Questao5.Teste.Application.Handlers
             };
 
             return command;
+        }
+
+        public ValidationResult BuscarValidationResultComSucesso()
+        {
+            return new ValidationResult();
+        }
+
+        public ValidationResult BuscarValidationResultCustomizadaComErro(string nomePropriedade, string mensagemErro)
+        {
+            var validationFailures = new List<ValidationFailure>
+            {
+                new ValidationFailure(nomePropriedade, mensagemErro)
+            };
+
+            return new ValidationResult(validationFailures);
         }
     }
 }
