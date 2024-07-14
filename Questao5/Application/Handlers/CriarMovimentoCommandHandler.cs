@@ -1,10 +1,12 @@
-﻿using MediatR;
+﻿using FluentValidation;
+using MediatR;
 using Questao5.Application.Commands.Requests;
 using Questao5.Application.Commands.Responses;
 using Questao5.Domain.Entities;
 using Questao5.Domain.Enumerators;
 using Questao5.Domain.Exceptions;
 using Questao5.Domain.Repositories;
+using Questao5.Infrastructure.Locking;
 using System.Text.Json;
 
 namespace Questao5.Application.Handlers
@@ -14,41 +16,60 @@ namespace Questao5.Application.Handlers
         private readonly IMovimentoRepository _movimentoRepository;
         private readonly IContaCorrenteRepository _contaCorrenteRepository;
         private readonly IIdempotenciaRepository _idempotenciaRepository;
+        private readonly ILockManager _lockManager;
+        private readonly IValidator<CriarMovimentoCommand> _validator;
 
         public CriarMovimentoCommandHandler(IMovimentoRepository movimentoRepository,
             IContaCorrenteRepository contaCorrenteRepository,
-            IIdempotenciaRepository idempotenciaRepository)
+            IIdempotenciaRepository idempotenciaRepository,
+            ILockManager lockManager,
+            IValidator<CriarMovimentoCommand> validator)
         {
             _movimentoRepository = movimentoRepository;
             _contaCorrenteRepository = contaCorrenteRepository;
             _idempotenciaRepository = idempotenciaRepository;
+            _lockManager = lockManager;
+            _validator = validator;
         }
 
         public async Task<CriarMovimentoResponse> Handle(CriarMovimentoCommand request, CancellationToken cancellationToken)
         {
-            if (request.Valor <= 0)
-                throw new ValidacaoException("TIPO: INVALID_VALUE", "O valor deve ser maior que 0");
+            using (await _lockManager.AcquireLockAsync(request.IdContacorrente))
+            {
+                var resultadoValidacao = await _validator.ValidateAsync(request, cancellationToken);
 
-            var contaCorrente = await _contaCorrenteRepository.BuscarPorId(request.IdContacorrente);
+                 if (!resultadoValidacao.IsValid)
+                    throw new ValidacaoException(resultadoValidacao.Errors);
 
-            if (contaCorrente is null)
-                throw new ValidacaoException("TIPO: INVALID_ACCOUNT", "Conta corrente não existe");
+                var contaCorrente = await _contaCorrenteRepository.BuscarPorId(request.IdContacorrente);
 
-            if (contaCorrente.Ativo.Equals(Ativo.inativa))
-                throw new ValidacaoException("TIPO: INACTIVE_ACCOUNT", "Conta corrente inativa");
+                if (contaCorrente is null)
+                    throw new ValidacaoException("TIPO: INVALID_ACCOUNT", "Conta corrente não existe");
 
-            var movimentoJaExistiu = await _movimentoRepository.BuscarPorIdMovimento(request.IdMovimento);
+                if (contaCorrente.Ativo.Equals(Ativo.inativa))
+                    throw new ValidacaoException("TIPO: INACTIVE_ACCOUNT", "Conta corrente inativa");
 
-            if (movimentoJaExistiu is not null)
-                throw new ValidacaoException("TIPO: MOVEMENT_ALREADY_EXISTS", $"IdMovimento {movimentoJaExistiu.IdMovimento} já existe");
+                var movimentoJaExistiu = await _movimentoRepository.BuscarPorIdMovimento(request.IdMovimento);
 
-            var movimento = new Movimento(request.IdMovimento, request.IdContacorrente, request.TipoMovimento, request.Valor);
-            var idempotencia = new Idempotencia(JsonSerializer.Serialize(request), "Sucesso");
+                if (movimentoJaExistiu is not null)
+                    throw new ValidacaoException("TIPO: MOVEMENT_ALREADY_EXISTS", $"IdMovimento {movimentoJaExistiu.IdMovimento} já existe");
 
-            await _movimentoRepository.Adicionar(movimento);
-            await _idempotenciaRepository.Adicionar(idempotencia);
+                var movimentos = await _movimentoRepository.BuscarPorIdContacorrente(request.IdContacorrente);
+                decimal somaValorCredito = movimentos.Where(m => m.Tipomovimento.Equals('C')).Sum(m => m.Valor);
+                decimal somaValorDebitos = movimentos.Where(m => m.Tipomovimento.Equals('D')).Sum(m => m.Valor);
+                decimal saldoAtual = somaValorCredito - somaValorDebitos;
 
-            return new CriarMovimentoResponse { IdMovimento = request.IdMovimento };
+                if (request.TipoMovimento.Equals('D') && request.Valor > saldoAtual)
+                    throw new ValidacaoException("TIPO: INSUFFICIENT_FUNDS", "Saldo insuficiente para realizar a movimentação");
+
+                var movimento = new Movimento(request.IdMovimento, request.IdContacorrente, request.TipoMovimento, request.Valor);
+                var idempotencia = new Idempotencia(JsonSerializer.Serialize(request), "Sucesso");
+
+                await _movimentoRepository.Adicionar(movimento);
+                await _idempotenciaRepository.Adicionar(idempotencia);
+
+                return new CriarMovimentoResponse { IdMovimento = request.IdMovimento };
+            }
         }
     }
 }

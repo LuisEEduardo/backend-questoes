@@ -4,6 +4,7 @@ using Questao5.Application.Queries.Requests;
 using Questao5.Domain.Entities;
 using Questao5.Domain.Exceptions;
 using Questao5.Domain.Repositories;
+using Questao5.Infrastructure.Locking;
 using Questao5.Teste.Utils;
 
 namespace Questao5.Teste.Application.Handlers
@@ -12,13 +13,15 @@ namespace Questao5.Teste.Application.Handlers
     {
         private readonly IContaCorrenteRepository _mockContaCorrenteRepository;
         private readonly IMovimentoRepository _mockMovimentoRepository;
+        private readonly ILockManager _lockManager;
         private readonly BuscarSaldoHandler _handler;
 
         public BuscarSaldoHandlerTeste()
         {
             _mockContaCorrenteRepository = Substitute.For<IContaCorrenteRepository>();
             _mockMovimentoRepository = Substitute.For<IMovimentoRepository>();
-            _handler = new BuscarSaldoHandler(_mockContaCorrenteRepository, _mockMovimentoRepository);
+            _lockManager = Substitute.For<ILockManager>();
+            _handler = new BuscarSaldoHandler(_mockContaCorrenteRepository, _mockMovimentoRepository, _lockManager);
         }
 
         [Fact]
